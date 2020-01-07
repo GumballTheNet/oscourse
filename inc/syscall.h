@@ -18,6 +18,13 @@ enum {
 	SYS_ipc_try_send,
 	SYS_ipc_recv,
 	SYS_gettime,
+	SYS_sched_setparam,
+	SYS_mutex_lock,
+	SYS_mutex_unlock,
+	SYS_mutex_create,
+	SYS_mutex_delete,
+	SYS_check_after,
+	SYS_try_deny,
 	NSYSCALLS
 };
 

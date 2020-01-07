@@ -8,6 +8,6 @@
 
 void tsc_calibrate(void);
 void timer_start(void);
-void timer_stop(void);
+int64_t timer_stop(void);
 
 #endif	// !JOS_KERN_TSC_H

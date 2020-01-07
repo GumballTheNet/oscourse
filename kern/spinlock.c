@@ -15,7 +15,7 @@ struct spinlock kernel_lock = {
 	.name = "kernel_lock"
 #endif
 };
-
+struct spinlock spin_array[NENV] ={0};
 #ifdef DEBUG_SPINLOCK
 // Record the current call stack in pcs[] by following the %ebp chain.
 static void
@@ -114,4 +114,5 @@ spin_unlock(struct spinlock *lk)
 	// the above assignments (and after the critical section).
 	xchg(&lk->locked, 0);
 }
+
 

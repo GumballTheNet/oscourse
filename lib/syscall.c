@@ -36,7 +36,13 @@ syscall(int num, int check, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, 
 
 	return ret;
 }
-
+int sys_sched_setparam(size_t envid, unsigned priority) {
+	int res = syscall(SYS_sched_setparam,0,envid,priority,0,0,0);
+	if (!res) {
+		sys_try_deny(envid);
+	}
+	return res;
+}
 void
 sys_cputs(const char *s, size_t len)
 {
@@ -95,7 +101,11 @@ sys_page_unmap(envid_t envid, void *va)
 int
 sys_env_set_status(envid_t envid, int status)
 {
-	return syscall(SYS_env_set_status, 1, envid, status, 0, 0, 0);
+	int res = syscall(SYS_env_set_status, 1, envid, status, 0, 0, 0);
+	if (!res &&( status == ENV_RUNNABLE || status == ENV_RUNNING)) {
+		sys_try_deny(envid);
+	}
+	return res;
 }
 
 int
@@ -113,7 +123,11 @@ sys_env_set_pgfault_upcall(envid_t envid, void *upcall)
 int
 sys_ipc_try_send(envid_t envid, uint32_t value, void *srcva, int perm)
 {
-	return syscall(SYS_ipc_try_send, 0, envid, value, (uint32_t) srcva, perm, 0);
+	int res = syscall(SYS_ipc_try_send, 0, envid, value, (uint32_t) srcva, perm, 0);
+	if (!res) {
+		sys_try_deny(envid);
+	}
+	return res;
 }
 
 int
@@ -125,4 +139,33 @@ sys_ipc_recv(void *dstva)
 int sys_gettime(void)
 {
 	return syscall(SYS_gettime, 0, 0, 0, 0, 0, 0);
+}
+
+int sys_mutex_lock(int mut_id, int try, int time) 
+{
+
+	return 	 syscall(SYS_mutex_lock, 0,mut_id, try, time, 0, 0);;
+}
+
+int sys_mutex_unlock(int mut_id) 
+{
+	return syscall(SYS_mutex_unlock, 0, mut_id, 0, 0, 0, 0);
+}
+
+int sys_mutex_create(int mut_id) {
+	return syscall(SYS_mutex_create, 0, mut_id, 0, 0, 0, 0);
+}
+
+int sys_mutex_delete(int mut_id) 
+{
+	return syscall(SYS_mutex_delete, 0,mut_id, 0, 0, 0, 0);
+}
+
+int sys_check_after(int mut_id, int stat) {
+	return syscall(SYS_check_after, 0,mut_id, stat, 0, 0, 0);
+}
+
+void 
+sys_try_deny(envid_t env_id) {
+	syscall(SYS_try_deny, 0, env_id, 0,0,0,0);
 }

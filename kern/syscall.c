@@ -12,10 +12,32 @@
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <kern/kclock.h>
+#include <kern/mutex.h>
 
-// Print a string to the system console.
-// The string is exactly 'len' characters long.
-// Destroys the environment on memory errors.
+static int
+sys_env_set_status(envid_t envid, int status)
+{
+	struct Env *e;
+	if (envid2env(envid, &e, 1) < 0) {
+		return -E_BAD_ENV;
+	} 
+	return set_status(e, status);
+}
+
+static int 
+sys_sched_setparam(size_t env_id, unsigned priority) {
+	struct Env *e;
+	if (envid2env(env_id, &e, 1) < 0) {
+		return -E_BAD_ENV;
+	}
+	if (priority >= PRIOR_COUNT) {
+		return -E_INVAL;
+	}
+	
+	return setparam(e, priority);
+}
+	
+
 static void
 sys_cputs(const char *s, size_t len)
 {
@@ -87,11 +109,11 @@ sys_exofork(void)
 	// LAB 9: Your code here.
 	int err;
 	struct Env *e;
-
 	if ((err = env_alloc(&e, curenv->env_id)) < 0) {
 		return err;
 	}
 	e->env_status = ENV_NOT_RUNNABLE;
+	e->priority = curenv->priority;
 	memcpy(&e->env_tf, &curenv->env_tf, sizeof(e->env_tf));
 	e->env_tf.tf_regs.reg_eax = 0;
 	return e->env_id;
@@ -104,27 +126,7 @@ sys_exofork(void)
 //	-E_BAD_ENV if environment envid doesn't currently exist,
 //		or the caller doesn't have permission to change envid.
 //	-E_INVAL if status is not a valid status for an environment.
-static int
-sys_env_set_status(envid_t envid, int status)
-{
-	// Hint: Use the 'envid2env' function from kern/env.c to translate an
-	// envid to a struct Env.
-	// You should set envid2env's third argument to 1, which will
-	// check whether the current environment has permission to set
-	// envid's status.
 
-	// LAB 9: Your code here.
-	struct Env *e;
-
-	if (status != ENV_RUNNABLE && status != ENV_NOT_RUNNABLE) {
-		return -E_INVAL;
-	}
-	if (envid2env(envid, &e, 1) < 0) {
-		return -E_BAD_ENV;
-	}
-	e->env_status = status;
-	return 0;
-}
 
 // Set envid's trap frame to 'tf'.
 // tf is modified to make sure that user environments always run at code
@@ -336,7 +338,6 @@ sys_ipc_try_send(envid_t envid, uint32_t value, void *srcva, unsigned perm)
 	// LAB 9: Your code here.
 	struct Env *target;
 	int err;
-
 	if (envid2env(envid, &target, 0) < 0) {
 		return -E_BAD_ENV;
 	}
@@ -354,7 +355,7 @@ sys_ipc_try_send(envid_t envid, uint32_t value, void *srcva, unsigned perm)
 	target->env_ipc_value = value;
 	target->env_ipc_from = curenv->env_id;
 	target->env_ipc_perm = perm;
-	target->env_status = ENV_RUNNABLE;
+	set_status(target, ENV_RUNNABLE);
 	return 0;
 }
 
@@ -378,8 +379,8 @@ sys_ipc_recv(void *dstva)
 	}
 	curenv->env_ipc_dstva = (uintptr_t) dstva < UTOP ? dstva : 0;
 	curenv->env_ipc_recving = 1;
-	curenv->env_status = ENV_NOT_RUNNABLE;
 	curenv->env_tf.tf_regs.reg_eax = 0;
+	set_status(curenv, ENV_NOT_RUNNABLE);
 	sched_yield();
 	return 0;
 }
@@ -393,6 +394,48 @@ sys_gettime(void)
 	return gettime();
 }
 
+void
+sys_mutex_lock(int mut_id, int try, int time) {
+	s_mutex_lock(mut_id,try,time);
+}
+static int
+sys_check_after(int mut_id, int stat) {
+	return s_check_after(mut_id, stat);
+}
+static int
+sys_mutex_unlock(int mut_id) {
+	s_mutex_unlock(mut_id);
+	return 0;
+}
+
+static int
+sys_mutex_create() {
+	return s_mutex_create();
+}
+
+static int
+sys_mutex_delete(int mut_id) {
+	s_mutex_delete(mut_id);
+	return 0;
+}
+
+void 
+sys_try_deny(envid_t env_id) {
+	struct Env *e;
+	if (envid2env(env_id, &e, 0) < 0) {
+		return;
+	}
+	if ((e->env_status == ENV_RUNNABLE || e->env_status == ENV_RUNNING) && e->priority > curenv->priority) {
+		env_run(e);
+	}
+	if (e == curenv) {
+		for (unsigned i = PRIOR_COUNT - 1; i > curenv->priority; --i) {
+			if (heads[i]) {
+				env_run(heads[i]);
+			}
+		}
+	}
+}
 // Dispatches to the correct kernel function, passing the arguments.
 int32_t
 syscall(uint32_t syscallno, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, uint32_t a5)
@@ -432,6 +475,22 @@ syscall(uint32_t syscallno, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, 
 		return sys_ipc_recv((void *) a1);
 	case SYS_gettime:
 		return sys_gettime();
+	case SYS_sched_setparam:
+		return sys_sched_setparam((unsigned)a1, (unsigned)a2);
+	case SYS_mutex_lock:
+		sys_mutex_lock((int)a1, (int)a2, (int) a3);
+		return 0;
+	case SYS_mutex_unlock:
+		return sys_mutex_unlock((int)a1);
+	case SYS_mutex_create:
+		return sys_mutex_create();
+	case SYS_mutex_delete:
+		return sys_mutex_delete((int)a1);
+	case SYS_check_after:
+		return sys_check_after((int)a1, (int)a2);
+	case SYS_try_deny:
+		sys_try_deny((envid_t)a1);
+		return 0;
 	default:
 		return -E_INVAL;
 	}

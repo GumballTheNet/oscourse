@@ -6,7 +6,7 @@
 #include <inc/string.h>
 #include <inc/assert.h>
 #include <inc/elf.h>
-
+#include <kern/tsc.h>
 #include <kern/env.h>
 #include <kern/pmap.h>
 #include <kern/trap.h>
@@ -14,7 +14,7 @@
 #include <kern/sched.h>
 #include <kern/cpu.h>
 #include <kern/kdebug.h>
-
+#include <kern/mutex.h>
 #ifdef CONFIG_KSPACE
 struct Env env_array[NENV];
 struct Env *curenv = NULL;
@@ -24,7 +24,10 @@ struct Env *envs = NULL;		// All environments
 struct Env *curenv = NULL;		// The current env
 #endif
 static struct Env *env_free_list;	// Free environment list
-					// (linked by Env->env_link)
+struct Env *waiting_envs = NULL;
+struct Env *lists[PRIOR_COUNT] = {0};
+struct Env *heads[PRIOR_COUNT] = {0};
+
 
 #define ENVGENSHIFT	12		// >= LOGNENV
 
@@ -245,14 +248,13 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 	e->env_type = ENV_TYPE_USER;
 #endif
 	e->env_status = ENV_RUNNABLE;
-	e->env_runs = 0;
-
+	e->limit = 25;
+	e->holding = -1;
 	// Clear out all the saved register state,
 	// to prevent the register values
 	// of a prior environment inhabiting this Env structure
 	// from "leaking" into our new environment.
 	memset(&e->env_tf, 0, sizeof(e->env_tf));
-
 	// Set up appropriate initial values for the segment registers.
 	// GD_UD is the user data (KD - kernel data) segment selector in the GDT, and
 	// GD_UT is the user text (KT - kernel text) segment selector (see inc/memlayout.h).
@@ -284,11 +286,10 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 
 	// Also clear the IPC receiving flag.
 	e->env_ipc_recving = 0;
-
+	e->rest_time = QUANTUM;
 	// commit the allocation
 	env_free_list = e->env_link;
 	*newenv_store = e;
-
 	cprintf("[%08x] new env %08x\n", curenv ? curenv->env_id : 0, e->env_id);
 	return 0;
 }
@@ -467,14 +468,15 @@ env_create(uint8_t *binary, size_t size, enum EnvType type)
 	if (type == ENV_TYPE_FS) {
 		e->env_tf.tf_eflags |= FL_IOPL_3;
 	}
+	add_env(e);
 }
-
 //
 // Frees env e and all memory it uses.
 //
 void
 env_free(struct Env *e)
 {
+
 #ifndef CONFIG_KSPACE
 	pte_t *pt;
 	uint32_t pdeno, pteno;
@@ -520,10 +522,23 @@ env_free(struct Env *e)
 	page_decref(pa2page(pa));
 #endif
 	// return the environment to the free list
+	if (e->holding != -1) {
+		extract_from_waiting(&mut_array[decode(e->holding)],e);
+		s_mutex_unlock(e->holding);
+	}
 	e->env_status = ENV_FREE;
 	e->env_link = env_free_list;
 	env_free_list = e;
+	for (int i = 0; i < NENV; ++i) {
+		if (mut_array[i].creator_id == e->env_id) {
+			s_mutex_delete(code(i));
+		}
+	}
+	extract_env(e);
+	e->priority = 0;
+
 }
+
 
 //
 // Frees environment e.
@@ -534,11 +549,78 @@ void
 env_destroy(struct Env *e)
 {
 	// LAB 3: Your code here.
+
 	env_free(e);
 	if (e == curenv) {
 		curenv = NULL;
 		sched_yield();
 	}
+}
+
+int extract_env(struct Env *e) {
+	struct Env *tmp = heads[e->priority];
+	if (tmp == e) {
+		if (lists[e->priority] == heads[e->priority]) {
+			lists[e->priority] = lists[e->priority]->env_next;
+		}
+		heads[e->priority] =heads[e->priority]->env_next;		
+	} else {
+		while (tmp && tmp->env_next != e) {
+			tmp = tmp->env_next;
+		}
+		if (!tmp) {
+			return -1;
+		}
+		tmp->env_next = e->env_next;
+		if (lists[e->priority] == e) {
+			lists[e->priority] = tmp;
+			lists[e->priority]->env_next = NULL;
+		}
+	}
+	e->env_next = NULL;
+	return 0;
+}
+
+void add_env(struct Env *e) {
+	e->env_next = NULL;
+	if (heads[e->priority]) {
+		lists[e->priority]->env_next = e;
+		lists[e->priority] = e;
+	} else {
+		heads[e->priority] = e;
+		lists[e->priority] = e;
+	}
+}
+
+int set_status(struct Env *e, int status)
+{
+	if (status != ENV_RUNNABLE && status != ENV_NOT_RUNNABLE && status != ENV_WAITING  && status != ENV_WAITING_WITH_TIME) {
+		return -E_INVAL;
+	}
+	if (status == ENV_RUNNABLE && e->env_status != ENV_RUNNABLE && e->env_status != ENV_RUNNING) {	
+		e->env_status = status;
+		add_env(e);
+	} else if ((status == ENV_NOT_RUNNABLE || status ==ENV_WAITING  || status == ENV_WAITING_WITH_TIME) && (e->env_status == ENV_RUNNABLE || e->env_status == ENV_RUNNING)) {
+		e->env_status = status;
+		extract_env(e);
+	} else {
+		e->env_status = status;
+	}
+	return 0;
+}
+
+int setparam(struct Env *e, unsigned priority) {
+	if (e->env_status ==ENV_RUNNING || e->env_status == ENV_RUNNABLE) {
+		extract_env(e);
+		e->priority = priority;
+		add_env(e);
+	} else {
+		e->priority = priority;
+		if ((e->env_status == ENV_WAITING || e->env_status == ENV_WAITING_WITH_TIME) && e->holding != -1 && mut_array[decode(e->holding)].owner->priority < e->priority) {
+			mut_array[decode(e->holding)].owner->priority =  e->priority;
+		}
+	}
+	return 0;
 }
 
 #ifdef CONFIG_KSPACE
@@ -615,6 +697,31 @@ env_pop_tf(struct Trapframe *tf)
 //
 // This function does not return.
 //
+
+struct Env* decrease() {
+	int64_t diff;
+	struct Env *to_run = curenv;
+	if ((diff = timer_stop()) != -1) {
+		int i = 0;
+		for (; i < NENV; ++i) {
+			if (envs[i].env_status == ENV_WAITING_WITH_TIME) {
+				envs[i].wait_time -= diff;	
+				if (envs[i].wait_time <= 0) {
+					envs[i].wait_time = 0;
+					if (!to_run || envs[i].priority > to_run->priority) {
+						to_run = &envs[i];
+					}
+					extract_from_waiting(&mut_array[decode(envs[i].holding)], &envs[i]);
+				}
+			}
+					
+		}
+		if (curenv) {
+			curenv->rest_time -= diff;
+		}
+	} 
+	return to_run;
+}
 void
 env_run(struct Env *e)
 {
@@ -642,13 +749,19 @@ env_run(struct Env *e)
 	//	e->env_tf to sensible values.
 	//
 	if (curenv != e) {
+		if (!e->rest_time) {
+			e->rest_time = QUANTUM;
+		}
+		decrease();
 		if (curenv && curenv->env_status == ENV_RUNNING)
 			curenv->env_status = ENV_RUNNABLE;
 		curenv = e;
 		curenv->env_status = ENV_RUNNING;
 		curenv->env_runs++;
+		timer_start();
 	}
 	lcr3(PADDR(e->env_pgdir));
 	env_pop_tf(&e->env_tf);
+	
 }
 

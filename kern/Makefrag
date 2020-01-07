@@ -32,7 +32,8 @@ KERN_SRCFILES :=	kern/entry.S \
 			lib/readline.c \
 			lib/string.c \
 			kern/tsc.c \
-			kern/spinlock.c
+			kern/spinlock.c \
+			kern/mutex.c
 
 ifeq ($(CONFIG_KSPACE),y)
 KERN_SRCFILES += kern/alloc.c
@@ -110,7 +111,15 @@ KERN_BINFILES :=	user/hello \
 			user/testpteshare \
 			user/testshell \
 			user/date \
-			user/vdate
+			user/vdate \
+			user/TEST1 \
+			user/TEST2 \
+			user/TEST3 \
+			user/TEST4 \
+			user/TEST5 \
+			user/TEST6 \
+			user/TEST7 \
+			user/TEST8
 KERN_BINFILES := $(patsubst %, $(OBJDIR)/%, $(KERN_BINFILES))
 endif
 

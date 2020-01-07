@@ -9,7 +9,7 @@
 // Mutual exclusion lock.
 struct spinlock {
 	unsigned locked;       // Is the lock held?
-
+	int allocated;
 #ifdef DEBUG_SPINLOCK
 	// For debugging:
 	char *name;            // Name of lock.
@@ -17,7 +17,7 @@ struct spinlock {
 	                       // that locked the lock.
 #endif
 };
-
+extern  struct spinlock spin_array[NENV];
 void __spin_initlock(struct spinlock *lk, char *name);
 void spin_lock(struct spinlock *lk);
 void spin_unlock(struct spinlock *lk);

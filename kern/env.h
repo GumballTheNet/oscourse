@@ -6,22 +6,29 @@
 #include <inc/env.h>
 #include <kern/cpu.h>
 
+extern struct Env env_array[];
 extern struct Env *envs;		// All environments
 extern struct Env *curenv;
 extern struct Segdesc gdt[];
-
+extern struct Env *lists[PRIOR_COUNT];
+extern struct Env *heads[PRIOR_COUNT];
+extern struct Env *current[PRIOR_COUNT];
+extern struct Env *waiting_envs;
 void	env_init(void);
 void	env_init_percpu(void);
 int	env_alloc(struct Env **e, envid_t parent_id);
 void	env_free(struct Env *e);
 void	env_create(uint8_t *binary, size_t size, enum EnvType type);
 void	env_destroy(struct Env *e);	// Does not return if e == curenv
-
+int extract_env(struct Env *e);
 int	envid2env(envid_t envid, struct Env **env_store, bool checkperm);
 // The following two functions do not return
 void	env_run(struct Env *e) __attribute__((noreturn));
 void	env_pop_tf(struct Trapframe *tf) __attribute__((noreturn));
-
+int set_status(struct Env *e, int status);
+void add_env(struct Env *e);
+struct Env* decrease();
+int setparam(struct Env *e, unsigned priority);
 static inline int
 curenv_getid(void)
 {

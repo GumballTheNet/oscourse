@@ -198,22 +198,24 @@ void print_timer_error(void)
 void timer_start(void)
 {
 	timer_start_ticks = read_tsc();
+					//cprintf(" %lld\n",read_tsc());
 	timer_stopped_again = 0;
 }
 
-void timer_stop(void)
+int64_t timer_stop(void)
 {
-	uint64_t time_diff;
+	int64_t time_diff;
 
 	if (timer_stopped_again) {
-		print_timer_error();
-		return;
+		return -1;
 	}
 	timer_stopped_again = 1;
 
 	time_diff = read_tsc();
+						//cprintf(" %ld\n", cpu_freq);
 	time_diff -= timer_start_ticks;
-	time_diff /= cpu_freq * 1000;
-	print_time(time_diff);
+	time_diff = time_diff / cpu_freq ;
+
+        return time_diff;
 }
 

@@ -44,7 +44,8 @@ rtc_init(void)
 	outb(IO_RTC_DATA, B);
 	outb(IO_RTC_CMND, RTC_AREG);
 	A = inb(IO_RTC_DATA);
-	A |= 0xE;
+	A = A & 0xE0;
+	A |= 0xC;
 	outb(IO_RTC_DATA, A);
 	nmi_enable();
 }

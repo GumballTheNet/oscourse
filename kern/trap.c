@@ -3,7 +3,7 @@
 #include <inc/assert.h>
 #include <inc/string.h>
 #include <inc/vsyscall.h>
-
+#include <kern/tsc.h>
 #include <kern/pmap.h>
 #include <kern/trap.h>
 #include <kern/console.h>
@@ -14,7 +14,7 @@
 #include <kern/kclock.h>
 #include <kern/picirq.h>
 #include <kern/cpu.h>
-
+#include <kern/mutex.h>
 #ifndef debug
 # define debug 0
 #endif
@@ -198,6 +198,7 @@ trap_dispatch(struct Trapframe *tf)
 {
 	// Handle processor exceptions.
 	if (tf->tf_trapno == T_SYSCALL) {
+		
 		tf->tf_regs.reg_eax = syscall(tf->tf_regs.reg_eax, tf->tf_regs.reg_edx,
 		tf->tf_regs.reg_ecx, tf->tf_regs.reg_ebx,
 		tf->tf_regs.reg_edi, tf->tf_regs.reg_esi);
@@ -223,12 +224,19 @@ trap_dispatch(struct Trapframe *tf)
 		print_trapframe(tf);
 		return;
 	}
-
 	if (tf->tf_trapno == IRQ_OFFSET + IRQ_CLOCK) {
+		struct Env *to_run = decrease();
 		rtc_check_status();
 		pic_send_eoi(IRQ_CLOCK);
 		vsys[VSYS_gettime] = gettime();
-		sched_yield();
+		if (curenv && curenv->rest_time <= 0) {
+			curenv->rest_time = 0;
+			sched_yield();
+		} else if (to_run != curenv) {
+			env_run(to_run);
+		} else {
+			timer_start();
+		}
 		return;
 	}
 
@@ -273,7 +281,6 @@ trap(struct Trapframe *tf)
 	if (debug) {
 		cprintf("Incoming TRAP frame at %p\n", tf);
 	}
-
 	assert(curenv);
 
 	// Garbage collect if current enviroment is a zombie

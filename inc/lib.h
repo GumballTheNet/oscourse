@@ -21,7 +21,7 @@
 #include <inc/fs.h>
 #include <inc/fd.h>
 #include <inc/args.h>
-
+#include <inc/mutex.h>
 #ifdef SANITIZE_USER_SHADOW_BASE
 // asan unpoison routine used for whitelisting regions.
 void platform_asan_unpoison(void *addr, uint32_t size);
@@ -68,9 +68,16 @@ int	sys_page_unmap(envid_t env, void *pg);
 int	sys_ipc_try_send(envid_t to_env, uint32_t value, void *pg, int perm);
 int	sys_ipc_recv(void *rcv_pg);
 int sys_gettime(void);
-
+int sys_sched_setparam(size_t env_id, unsigned priority);
 int vsys_gettime(void);
-
+int sys_add_wait(void);
+int sys_delete_wait(void);
+int sys_mutex_lock(int mut_id, int try, int time);
+int sys_mutex_unlock(int mut);
+int sys_mutex_create();
+int sys_mutex_delete(int mut) ;
+int sys_check_after(int mut_id, int stat) ;
+void sys_try_deny(envid_t env_id) ;
 // This must be inlined.  Exercise for reader: why?
 static __inline envid_t __attribute__((always_inline))
 sys_exofork(void)
@@ -131,8 +138,20 @@ int	pipeisclosed(int pipefd);
 
 // wait.c
 void	wait(envid_t env);
+//param.c
+int sched_setparam(size_t env_id, unsigned priority);
 
-/* File open modes */
+//mutex.h
+int mutex_lock(int mut, int try, int time);
+int mutex_unlock(int mut);
+int mutex_delete(int mut);
+int mutex_create();
+
+//sh_params.c
+const int sched_rr_get_interval();
+const int sched_get_priority_min();
+const int sched_get_priority_max();
+/* Filopen modes */
 #define	O_RDONLY	0x0000		/* open for reading only */
 #define	O_WRONLY	0x0001		/* open for writing only */
 #define	O_RDWR		0x0002		/* open for reading and writing */

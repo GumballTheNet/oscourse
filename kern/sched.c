@@ -1,8 +1,9 @@
 #include <inc/assert.h>
 #include <inc/x86.h>
+#include <inc/env.h>
+#include <kern/mutex.h>
 #include <kern/env.h>
 #include <kern/monitor.h>
-
 
 struct Taskstate cpu_ts;
 void sched_halt(void);
@@ -11,30 +12,26 @@ void sched_halt(void);
 void
 sched_yield(void)
 {
-	// Implement simple round-robin scheduling.
-	//
-	// Search through 'envs' for an ENV_RUNNABLE environment in
-	// circular fashion starting just after the env was
-	// last running.  Switch to the first such environment found.
-	//
-	// If no envs are runnable, but the environment previously
-	// running is still ENV_RUNNING, it's okay to
-	// choose that environment.
-	//
-	// If there are no runnable environments,
-	// simply drop through to the code
-	// below to halt the cpu.
-
-	size_t i, counter;
-
-	i = curenv ? (curenv - envs + 1) % NENV : 0;
-	for (counter = 0; counter++ < NENV; i = (i + 1) % NENV) {
-		if (envs[i].env_status == ENV_RUNNABLE ||
-			(counter == NENV && envs[i].env_status == ENV_RUNNING))
-			env_run(&envs[i]);
+	if (curenv && (heads[curenv->priority] != lists[curenv->priority] && curenv != lists[curenv->priority])) {
+		if (extract_env(curenv) != -1)
+			add_env(curenv);
+        }
+	for (int i = PRIOR_COUNT - 1; i >= 0; --i) {
+		if (heads[i]) {
+			env_run(heads[i]);
+		}
 	}
-
-	// sched_halt never returns
+	struct Env *to_wake = NULL;
+	for (int i = 0; i < NENV; ++i) {
+		if (envs[i].env_status == ENV_WAITING_WITH_TIME && (!to_wake || envs[i].priority > to_wake->priority)) {
+			to_wake = &envs[i];
+		}
+	}
+	if (to_wake && to_wake->holding != -1) {
+		to_wake->wait_time = -1;
+		extract_from_waiting(&mut_array[decode(to_wake->holding)], to_wake);
+		env_run(to_wake);
+	}
 	sched_halt();
 }
 
@@ -59,7 +56,6 @@ sched_halt(void)
 		while (1)
 			monitor(NULL);
 	}
-
 	// Mark that no environment is running on CPU
 	curenv = NULL;
 

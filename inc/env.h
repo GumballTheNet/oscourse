@@ -28,14 +28,17 @@ typedef int32_t envid_t;
 #define LOG2NENV		10
 #define NENV			(1 << LOG2NENV)
 #define ENVX(envid)		((envid) & (NENV - 1))
-
+#define QUANTUM                 90
+#define PRIOR_COUNT             32				
 // Values of env_status in struct Env
 enum {
 	ENV_FREE = 0,
 	ENV_DYING,
 	ENV_RUNNABLE,
 	ENV_RUNNING,
-	ENV_NOT_RUNNABLE
+	ENV_NOT_RUNNABLE,
+	ENV_WAITING,
+	ENV_WAITING_WITH_TIME
 };
 
 // Special environment types
@@ -65,6 +68,13 @@ struct Env {
 	uint32_t env_ipc_value;		// Data value sent to us
 	envid_t env_ipc_from;		// envid of the sender
 	int env_ipc_perm;		// Perm of page mapping received
+	unsigned priority;
+	struct Env *env_next;
+	int wait_time;
+	int rest_time;
+	struct Env *wait_next;
+	int holding;
+	int limit;
 };
 
 #endif // !JOS_INC_ENV_H
